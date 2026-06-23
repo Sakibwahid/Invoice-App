@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import html2pdf from "html2pdf.js";
 import { useInvoiceById } from "../hooks/useInvoiceById";
 import { useSettings } from "../hooks/useSettings";
 
@@ -9,6 +10,115 @@ const STATUS_CONFIG = {
   Partial: { bg: "bg-amber-50",   text: "text-amber-600",   border: "border-amber-200",   dot: "bg-amber-500"   },
 };
 
+const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+
+const linearToSrgb = (value) => {
+  const v = clamp(value);
+  return v >= 0.0031308
+    ? 1.055 * Math.pow(v, 1 / 2.4) - 0.055
+    : 12.92 * v;
+};
+
+const oklabToRgbValue = (l, a, b, alpha = 1) => {
+  const lPrime = l + 0.3963377774 * a + 0.2158037573 * b;
+  const mPrime = l - 0.1055613458 * a - 0.0638541728 * b;
+  const sPrime = l - 0.0894841775 * a - 1.291485548 * b;
+
+  const l3 = lPrime ** 3;
+  const m3 = mPrime ** 3;
+  const s3 = sPrime ** 3;
+
+  const r = linearToSrgb(4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3);
+  const g = linearToSrgb(-1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3);
+  const blue = linearToSrgb(-0.0041960863 * l3 - 0.7034186147 * m3 + 1.707614701 * s3);
+
+  const rgb = [
+    Math.round(clamp(r) * 255),
+    Math.round(clamp(g) * 255),
+    Math.round(clamp(blue) * 255),
+  ];
+
+  return alpha < 1 ? `rgba(${rgb.join(", ")}, ${alpha})` : `rgb(${rgb.join(", ")})`;
+};
+
+const parseColorParts = (match, colorFunction) =>
+  match
+    .replace(new RegExp(`^${colorFunction}\\(`), "")
+    .replace(/\)$/, "")
+    .replace("/", " ")
+    .trim()
+    .split(/\s+/);
+
+const oklchToRgb = (match) => {
+  const parts = parseColorParts(match, "oklch");
+  const l = Number.parseFloat(parts[0]);
+  const c = Number.parseFloat(parts[1]);
+  const h = Number.parseFloat(parts[2]);
+  const alpha = parts[3] ? Number.parseFloat(parts[3]) : 1;
+
+  if ([l, c, h].some(Number.isNaN)) return "rgb(0, 0, 0)";
+
+  const hue = (h * Math.PI) / 180;
+  return oklabToRgbValue(l, c * Math.cos(hue), c * Math.sin(hue), alpha);
+};
+
+const oklabToRgb = (match) => {
+  const parts = parseColorParts(match, "oklab");
+  const l = Number.parseFloat(parts[0]);
+  const a = Number.parseFloat(parts[1]);
+  const b = Number.parseFloat(parts[2]);
+  const alpha = parts[3] ? Number.parseFloat(parts[3]) : 1;
+
+  if ([l, a, b].some(Number.isNaN)) return "rgb(0, 0, 0)";
+
+  return oklabToRgbValue(l, a, b, alpha);
+};
+
+const normalizeModernColorFunctions = (value) =>
+  value
+    .replace(/oklch\([^)]+\)/g, oklchToRgb)
+    .replace(/oklab\([^)]+\)/g, oklabToRgb);
+
+const normalizeUnsupportedColors = (root, win) => {
+  const colorProps = [
+    "color",
+    "backgroundColor",
+    "borderTopColor",
+    "borderRightColor",
+    "borderBottomColor",
+    "borderLeftColor",
+    "outlineColor",
+    "textDecorationColor",
+  ];
+
+  [root, ...root.querySelectorAll("*")].forEach((node) => {
+    const computed = win.getComputedStyle(node);
+
+    colorProps.forEach((prop) => {
+      const value = node.style[prop] || computed[prop];
+      if (value?.includes("oklch(") || value?.includes("oklab(")) {
+        node.style[prop] = normalizeModernColorFunctions(value);
+      }
+    });
+
+    const boxShadow = node.style.boxShadow || computed.boxShadow;
+    if (boxShadow?.includes("oklch(") || boxShadow?.includes("oklab(")) {
+      node.style.boxShadow = normalizeModernColorFunctions(boxShadow);
+    }
+
+    ["fill", "stroke"].forEach((prop) => {
+      const value = node.style[prop] || computed[prop];
+      if (value?.includes("oklch(") || value?.includes("oklab(")) {
+        node.style[prop] = normalizeModernColorFunctions(value);
+      }
+    });
+
+    if (node.style.cssText.includes("oklch(") || node.style.cssText.includes("oklab(")) {
+      node.style.cssText = normalizeModernColorFunctions(node.style.cssText);
+    }
+  });
+};
+
 const InvoiceView = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -16,6 +126,35 @@ const InvoiceView = () => {
 
   const { data: invoice, isLoading, error } = useInvoiceById(id);
   const { data: settings } = useSettings();
+
+  const handleDownloadPdf = () => {
+    if (!printRef.current || !invoice) return;
+
+    const options = {
+      margin: 10,
+      filename: `${invoice.invoiceNumber || "invoice"}.pdf`,
+      image: { type: "jpeg", quality: 0.98 },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        onclone: (doc) => {
+          normalizeUnsupportedColors(doc.body, doc.defaultView);
+        },
+      },
+      jsPDF: {
+        unit: "mm",
+        format: "a4",
+        orientation: "portrait",
+      },
+      pagebreak: {
+        mode: ["css", "legacy"],
+        avoid: [".break-avoid", "table", "tr"],
+      },
+    };
+
+    html2pdf().set(options).from(printRef.current).save();
+  };
 
   const handlePrint = () => {
     const content = printRef.current.innerHTML;
@@ -94,15 +233,27 @@ const InvoiceView = () => {
           Back
         </button>
 
-        <button
-          onClick={handlePrint}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-normal rounded-xl transition-all duration-150 active:scale-95 shadow-sm"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-          </svg>
-          Print Invoice
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleDownloadPdf}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-normal rounded-xl transition-all duration-150 active:scale-95 shadow-sm"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Download PDF
+          </button>
+
+          <button
+            onClick={handlePrint}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-normal rounded-xl transition-all duration-150 active:scale-95 shadow-sm"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+            Print Invoice
+          </button>
+        </div>
       </div>
 
       {/* ── Invoice Document ── */}
