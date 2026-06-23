@@ -1,0 +1,56 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================
+    // AUTHENTICATION HELPER
+    // ============================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // ============================================
+    // USERS COLLECTION
+    // ============================================
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ============================================
+    // INVOICES COLLECTION
+    // ============================================
+    match /invoices/{invoiceId} {
+      // Allow authenticated users to read their invoices
+      allow read: if isSignedIn();
+
+      // Allow creating invoices only if authenticated
+      allow create: if isSignedIn() && 
+        request.resource.data.keys().hasAll(['client', 'items', 'total', 'invoiceNumber']);
+
+      // Allow updating invoices only if authenticated
+      allow update: if isSignedIn();
+
+      // Allow deleting invoices only if authenticated
+      allow delete: if isSignedIn();
+    }
+
+    // ============================================
+    // QUOTATIONS COLLECTION
+    // ============================================
+    match /quotations/{quotationId} {
+      // Allow authenticated users to read quotations
+      allow read: if isSignedIn();
+
+      // Allow creating quotations only if authenticated and has required fields
+      allow create: if isSignedIn() && 
+        request.resource.data.keys().hasAll(['client', 'items', 'total', 'quotationNumber', 'status']);
+
+      // Allow updating quotations only if authenticated
+      allow update: if isSignedIn();
+
+      // Allow deleting quotations only if authenticated
+      allow delete: if isSignedIn();
+    }
+  }
+}
