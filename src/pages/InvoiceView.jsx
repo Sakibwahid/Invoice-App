@@ -131,7 +131,7 @@ const InvoiceView = () => {
     if (!printRef.current || !invoice) return;
 
     const options = {
-      margin: 10,
+     margin: 0,
       filename: `${invoice.invoiceNumber || "invoice"}.pdf`,
       image: { type: "jpeg", quality: 0.98 },
       html2canvas: {
@@ -261,7 +261,7 @@ const InvoiceView = () => {
         <div ref={printRef} className="p-10 break-avoid print:p-0">
 
           {/* ══ HEADER ══ */}
-          <div className="flex items-start justify-between pb-8 border-b-2 border-slate-100 break-avoid">
+          <div className="flex items-center justify-between pb-8 border-b-2 border-slate-100 break-avoid">
 
             {/* Left — logo + company */}
             <div className="space-y-2">
@@ -289,7 +289,7 @@ const InvoiceView = () => {
               </div>
 
               {/* Status */}
-              <div className="flex justify-end">
+              <div className="flex justify-end items-center gap-2">
                 <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${cfg.bg} ${cfg.text} ${cfg.border}`}>
                   <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
                   {invoice.status}
@@ -344,7 +344,7 @@ const InvoiceView = () => {
           {/* ══ ITEMS TABLE ══ */}
           <table className="w-full border-collapse mb-8 break-avoid print:break-inside-auto">
             <thead>
-              <tr className="bg-blue-600 print:bg-blue-600">
+              <tr className="bg-blue-600 print:bg-blue-600 break-avoid print:break-inside-avoid">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-white uppercase tracking-wider w-1/2">Items Description</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-white uppercase tracking-wider">Unit Price</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-white uppercase tracking-wider">Qty</th>
